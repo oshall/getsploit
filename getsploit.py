@@ -28,6 +28,7 @@ import platform
 import unicodedata
 import re
 import os
+import pprint
 
 vulnersURL = {
     'searchAPI' : 'https://vulners.com/api/v3/search/lucene/',
@@ -629,6 +630,7 @@ def getUrllibOpener():
     else:
         opener = urllib2.build_opener(urllib2.HTTPSHandler())
         opener.addheaders = [('Content-Type', 'application/json'), ('User-Agent', 'vulners-getsploit-v%s' % __version__)]
+        print opener
     return opener
 
 
@@ -686,10 +688,23 @@ def exploitLocalSearch(query, lookupFields = None, limit = 10):
         print("Your SQLite3 library does not support FTS4. Sorry, without this option local search will not work. Recompile SQLite3 with ENABLE_FTS4 option.")
         exit()
     preparedQuery = " AND ".join(['"%s"' % word for word in query.split()])
-    searchRawResults = cursor.execute("SELECT * FROM exploits WHERE exploits MATCH ? ORDER BY published LIMIT ?", ('%s' % preparedQuery,limit)).fetchall()
+    searchRawResults = cursor.execute("SELECT * FROM exploits WHERE exploits MATCH ? AND description LIKE '%cve%' ORDER BY published LIMIT ?", ('%s' % preparedQuery,limit)).fetchall()    
     searchCount = cursor.execute("SELECT Count(*) FROM exploits WHERE exploits MATCH ? ORDER BY published LIMIT ?", ('%s' % preparedQuery,limit)).fetchone()
     searchResults = {'total':searchCount,'search':[]}
     for element in searchRawResults:
+    
+        print "LOOK HERE"
+        reg = re.compile("CVE-\d{4}-\d{4,7}")
+        description_cve = reg.search(element[3])
+        if description_cve:
+            description_cve = reg.search(element[3]).group()
+            print description_cve
+
+        pprint.pprint(element[3])
+        print type(element[3])
+        print description_cve   
+        print "LOOK HERE"
+        
         searchResults['search'].append({'_source':
                                                {'id':element[0],
                                                 'title':element[1],
@@ -697,9 +712,13 @@ def exploitLocalSearch(query, lookupFields = None, limit = 10):
                                                 'description':element[3],
                                                 'sourceData':element[4],
                                                 'vhref':element[5],
+                                                'cve':description_cve,
                                                 }
                                         })
+        
+
     # Output must b
+    print "LOCAL SQL: SELECT * FROM exploits WHERE exploits MATCH ? ORDER BY published LIMIT ?", ('%s' % preparedQuery,limit)
     return query, searchResults
 
 def main():
@@ -760,17 +779,17 @@ def main():
         finalQuery, searchResults = exploitSearch(searchQuery, lookupFields=['title'] if options.title else None, limit = options.count)
 
     outputTable = Texttable()
-    outputTable.set_cols_dtype(['t', 't', 't'])
-    outputTable.set_cols_align(['c', 'l', 'c'])
-    outputTable.set_cols_width(['20', '30', '100'])
-    tableRows = [['ID', 'Exploit Title', 'URL']]
+    outputTable.set_cols_dtype(['t', 't', 't', 't'])
+    outputTable.set_cols_align(['c', 'l', 'c', 'l'])
+    outputTable.set_cols_width(['20', '50', '100','15'])
+    tableRows = [['ID', 'Exploit Title', 'URL' , 'CVE']]
     jsonRows = []
     for bulletinSource in searchResults.get('search'):
         bulletin = bulletinSource.get('_source')
         bulletinUrl = bulletin.get('vref') or 'https://vulners.com/%s/%s' % (bulletin.get('type'), bulletin.get('id'))
-        tableRows.append([bulletin.get('id'), bulletin.get('title'), bulletinUrl])
+        tableRows.append([bulletin.get('id'), bulletin.get('title'), bulletinUrl, bulletin.get('cve')])
         if options.json:
-            jsonRows.append({'id':bulletin.get('id'), 'title':bulletin.get('title'), 'url':bulletinUrl})
+            jsonRows.append({'id':bulletin.get('id'), 'title':bulletin.get('title'), 'url':bulletinUrl, 'cve':bulletin.get('cve')})
         if options.mirror:
             pathName = './%s' % slugify(searchQuery)
             # Put results it the dir
@@ -794,14 +813,9 @@ def main():
         print("Web-search URL: https://vulners.com/search?query=%s" % quoteStringHandler(finalQuery))
         # Set max coll width by len of the url for better copypaste
         maxWidth = max(len(element[2]) for element in tableRows)
-        outputTable.set_cols_width([20, 30, maxWidth])
+        outputTable.set_cols_width([20, 50, maxWidth, 15])
         outputTable.add_rows(tableRows)
-        if pythonVersion < 3.0:
-            # Just pass non-ascii
-            print(outputTable.draw().decode('ascii', 'ignore'))
-        else:
-            # Any better solution here?
-            print(outputTable.draw().encode('ascii', 'ignore').decode())
+        print(outputTable.draw())
 
 if __name__ == '__main__':
     main()
